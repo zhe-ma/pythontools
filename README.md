@@ -37,6 +37,12 @@ conda env export > environments.txt
 conda env create -f environments.txt
 ```
 
+### 5. 执行
+
+```bash
+/opt/miniconda3/envs/pythontools/bin/python src/kaoyan/main.py
+```
+
 ## 常用命令
 
 - 查看已安装的包：
