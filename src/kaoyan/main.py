@@ -30,14 +30,26 @@ def save_raw_text(text, output_path):
 
 def clean_text(text):
     """清理文本，只保留英文单词"""
-    # 只保留英文字母、空格和基本标点
-    text = re.sub(r'[^a-zA-Z\s.,!?]', ' ', text)
     # 转换为小写
     text = text.lower()
-    # 使用 NLTK 的 word_tokenize 进行分词
-    words = word_tokenize(text)
-    # 只保留长度大于1的单词
+    
+    # 只保留英文字母、空格、连字符和单引号
+    text = re.sub(r'[^a-zA-Z\s\'-]', ' ', text)
+    
+    # 处理特殊情况
+    # 1. 将多个空格替换为单个空格
+    text = re.sub(r'\s+', ' ', text)
+    # 2. 确保连字符前后有空格（除了在单词内部）
+    text = re.sub(r'(?<=\w)-(?=\w)', '', text)  # 保留单词内部的连字符
+    text = re.sub(r'-', ' ', text)  # 其他连字符替换为空格
+    
+    # 使用正则表达式进行分词
+    # 匹配英文单词（包括带连字符和缩写的单词）
+    words = re.findall(r"\b[a-zA-Z]+(?:'[a-zA-Z]+)?(?:-[a-zA-Z]+)*\b", text)
+    
+    # 过滤掉长度小于2的单词
     words = [word for word in words if len(word) > 1]
+    
     return words
 
 def count_words(words):
