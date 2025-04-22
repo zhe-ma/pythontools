@@ -1,0 +1,4 @@
+# 忽略res/output目录下的所有文件
+src/kaoyan/res/output/*
+# 保留output目录本身
+!src/kaoyan/res/output/ 
