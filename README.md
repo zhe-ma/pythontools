@@ -26,7 +26,7 @@ conda activate pythontools
 将当前环境配置导出到文件：
 
 ```bash
-conda env export > environments.txt
+conda env export > environments.yml
 ```
 
 ### 4. 从配置文件恢复环境
@@ -34,7 +34,7 @@ conda env export > environments.txt
 如果需要在其他机器上恢复相同的环境：
 
 ```bash
-conda env create -f environments.txt
+conda env create -f environments.yml
 ```
 
 ### 5. 执行
@@ -72,13 +72,13 @@ conda env create -f environments.txt
 
 - 更新环境（当environments.txt有更新时）：
   ```bash
-  conda env update -f environments.txt --prune
+  conda env update -f environments.yml --prune
   ```
 
 ## 注意事项
 
-1. 环境文件 `environments.txt` 包含了所有包的精确版本信息，确保环境的一致性
-2. 每次安装新包后，建议更新 `environments.txt` 文件
+1. 环境文件 `environments.yml` 包含了所有包的精确版本信息，确保环境的一致性
+2. 每次安装新包后，建议更新 `environments.yml` 文件
 3. 环境名称 `pythontools` 可以根据项目需求修改
 4. 当其他开发者更新了环境配置，使用 `conda env update --prune` 命令来同步更改，`--prune` 参数会移除配置文件中不再需要的包
 

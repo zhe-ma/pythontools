@@ -7,10 +7,128 @@ import nltk
 from nltk.tokenize import word_tokenize
 import os
 import shutil
+from nltk.corpus import cmudict
+from nltk.corpus import wordnet
+import gzip
+import requests
+import io
+import pickle
 
 # 下载 NLTK 所需的数据
 nltk.download('punkt')  # 用于分词
 nltk.download('punkt_tab')  # 用于英文分词
+nltk.download('cmudict')  # 用于音标
+nltk.download('wordnet')  # 用于词义
+
+def prepare_environment():
+    """准备执行环境，包括下载和加载CC-CEDICT词典"""
+    # 获取当前目录
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    output_dir = os.path.join(current_dir, 'res/output')
+    
+    # 确保输出目录存在
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # CC-CEDICT词典文件路径
+    cedict_path = os.path.join(output_dir, 'cedict_1_0_ts_utf-8_mdbg.txt')
+    
+    # 如果词典文件不存在，则下载
+    if not os.path.exists(cedict_path):
+        print("正在下载CC-CEDICT词典...")
+        url = "https://www.mdbg.net/chinese/export/cedict/cedict_1_0_ts_utf-8_mdbg.txt.gz"
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+            
+            # 解压并保存词典文件
+            with gzip.GzipFile(fileobj=io.BytesIO(response.content)) as gz_file:
+                with open(cedict_path, 'wb') as f:
+                    f.write(gz_file.read())
+            print("CC-CEDICT词典下载完成")
+        except Exception as e:
+            print(f"下载CC-CEDICT词典失败: {e}")
+            return False
+    
+    # 加载词典
+    global cedict
+    cedict = CEDict(cedict_path)
+    return True
+
+class CEDict:
+    def __init__(self, dict_path='cedict_1_0_ts_utf-8_mdbg.txt'):
+        self.dict = {}
+        self.cache_path = dict_path + '.cache'
+        self.load_dict(dict_path)
+    
+    def load_dict(self, dict_path):
+        """加载词典文件"""
+        if not os.path.exists(dict_path):
+            print(f"词典文件 {dict_path} 不存在，请先下载")
+            return
+        
+        # 尝试加载缓存
+        if os.path.exists(self.cache_path):
+            try:
+                print("正在加载CC-CEDICT词典缓存...")
+                with open(self.cache_path, 'rb') as f:
+                    self.dict = pickle.load(f)
+                print("CC-CEDICT词典缓存加载完成")
+                return
+            except Exception as e:
+                print(f"缓存加载失败: {e}，重新生成词典...")
+                # 删除损坏的缓存文件
+                try:
+                    os.remove(self.cache_path)
+                except:
+                    pass
+        
+        print("正在加载CC-CEDICT词典...")
+        with open(dict_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                if line.startswith('#'):
+                    continue
+                # 解析词典行
+                parts = line.strip().split(' ', 2)
+                if len(parts) < 3:
+                    continue
+                
+                traditional, simplified, rest = parts
+                # 提取拼音和释义
+                pinyin_start = rest.find('[')
+                pinyin_end = rest.find(']')
+                if pinyin_start == -1 or pinyin_end == -1:
+                    continue
+                
+                pinyin = rest[pinyin_start+1:pinyin_end]
+                definition = rest[pinyin_end+2:]
+                
+                # 存储到字典
+                self.dict[simplified.lower()] = {
+                    'pinyin': pinyin,
+                    'definition': definition
+                }
+        
+        # 保存缓存
+        try:
+            print("正在保存词典缓存...")
+            with open(self.cache_path, 'wb') as f:
+                pickle.dump(self.dict, f)
+            print("词典缓存保存完成")
+        except Exception as e:
+            print(f"缓存保存失败: {e}，但不影响词典使用")
+        
+        print("CC-CEDICT词典加载完成")
+    
+    def lookup(self, word):
+        """查询单词"""
+        return self.dict.get(word.lower(), None)
+
+# 创建词典实例
+cedict = None
+
+# 创建查询缓存
+meaning_cache = {}
+phonetic_cache = {}
 
 def extract_text_from_pdf(pdf_path):
     """从 PDF 文件中提取文本，使用 pdfplumber 以保留更好的格式"""
@@ -80,6 +198,11 @@ def process_file(input_file, output_dir):
     # 构建输出文件路径
     raw_text_path = os.path.join(output_dir, f"{base_name}.txt")
     
+    # 检查是否已经处理过
+    if os.path.exists(raw_text_path):
+        print(f"文件 {base_name} 已经处理过，跳过")
+        return Counter()
+    
     # 提取文本
     text = extract_text_from_pdf(input_file)
     
@@ -128,6 +251,81 @@ def get_word_variants(word):
         variants.add(word[:-1])  # played -> play
     
     return variants
+
+def get_base_form(word):
+    """获取单词的基础形式"""
+    try:
+        # 尝试获取词形变化
+        lemma = wordnet.morphy(word)
+        if lemma:
+            return lemma
+        return word
+    except:
+        return word
+
+def get_phonetic(word):
+    """获取单词的音标"""
+    # 检查缓存
+    if word in phonetic_cache:
+        return phonetic_cache[word]
+    
+    try:
+        # 获取基础形式
+        base_word = get_base_form(word.lower())
+        
+        # 尝试查找变体形式
+        for variant in [base_word] + list(get_word_variants(base_word)):
+            # 使用CC-CEDICT查询
+            result = cedict.lookup(variant)
+            if result:
+                phonetic_cache[word] = result['pinyin']
+                return result['pinyin']
+            
+            # 如果CC-CEDICT找不到，尝试CMU词典
+            d = cmudict.dict()
+            if variant in d:
+                phonetic = ' '.join(d[variant][0])
+                phonetic_cache[word] = phonetic
+                return phonetic
+        
+        phonetic_cache[word] = ''
+        return ''
+    except:
+        phonetic_cache[word] = ''
+        return ''
+
+def get_meaning(word):
+    """获取单词的中文释义"""
+    # 检查缓存
+    if word in meaning_cache:
+        return meaning_cache[word]
+    
+    try:
+        # 获取基础形式
+        base_word = get_base_form(word.lower())
+        
+        # 尝试查找变体形式
+        for variant in [base_word] + list(get_word_variants(base_word)):
+            # 使用CC-CEDICT查询
+            result = cedict.lookup(variant)
+            if result:
+                meaning_cache[word] = result['definition']
+                return result['definition']
+            
+            # 如果CC-CEDICT找不到，尝试WordNet
+            synsets = wordnet.synsets(variant)
+            if synsets:
+                lemmas = synsets[0].lemmas(lang='cmn')
+                if lemmas:
+                    meaning = lemmas[0].name()
+                    meaning_cache[word] = meaning
+                    return meaning
+        
+        meaning_cache[word] = ''
+        return ''
+    except:
+        meaning_cache[word] = ''
+        return ''
 
 def compare_word_lists():
     """比较大纲.csv和word_counts.csv中的单词，生成差异报告"""
@@ -213,13 +411,21 @@ def compare_word_lists():
         
         # 只有当单词至少在一个列表中存在时才添加到结果中
         if outline_match is not None or in_word_counts:
+            # 如果在大纲中不存在，则查询词典
+            if outline_match is None:
+                phonetic = get_phonetic(base_word)
+                meaning = get_meaning(base_word)
+            else:
+                phonetic = outline_match[0]
+                meaning = outline_match[1]
+            
             result_data.append({
                 'Word': base_word,
                 'In_Outline': outline_match is not None,
                 'In_Word_Counts': in_word_counts,
                 'Count': base_word_counts[base_word],
-                'Column2': outline_match[0] if outline_match is not None else '',
-                'Column3': outline_match[1] if outline_match is not None else ''
+                'Column2': phonetic,
+                'Column3': meaning
             })
     
     result_df = pd.DataFrame(result_data)
@@ -230,6 +436,11 @@ def compare_word_lists():
     print(f"差异报告已保存到 {output_path}")
 
 def main():
+    # 准备执行环境
+    if not prepare_environment():
+        print("环境准备失败，程序退出")
+        return
+    
     # 获取目录路径
     current_dir = os.path.dirname(os.path.abspath(__file__))
     input_dir = os.path.join(current_dir, 'res/input')
